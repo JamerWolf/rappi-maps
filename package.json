@@ -1,0 +1,13 @@
+{
+  "name": "rappi_maps",
+  "version": "1.0.0",
+  "description": "Rappi restaurant map for Norte de Santander",
+  "type": "module",
+  "scripts": {
+    "fetch": "node fetch-restaurants.mjs",
+    "map": "node fetch-restaurants.mjs && start map.html"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

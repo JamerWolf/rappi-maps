@@ -1,32 +1,4 @@
 const fs = require('fs');
-const restaurants = JSON.parse(fs.readFileSync('restaurants.json','utf-8'));
-
-function esc(str) {
-  return String(str).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-}
-
-const markers = restaurants.filter(r => r.lat && r.lng).map(r =>
-`    L.marker([${r.lat}, ${r.lng}], {
-      icon: L.divIcon({
-        className: 'custom-marker',
-        html: '<div class="marker-dot ${r.is_available ? "available" : "unavailable"}"></div>',
-        iconSize: [12, 12],
-        iconAnchor: [6, 6],
-      })
-    }).addTo(map).bindPopup(\`
-      <div style="min-width:220px">
-        ${r.logo ? `<img src="${esc(r.logo)}" style="width:100%;height:60px;object-fit:cover;border-radius:6px;margin-bottom:6px" onerror="this.style.display='none'">` : ""}
-        <strong style="font-size:14px">${esc(r.name)}</strong><br>
-        <span style="color:#666;font-size:12px">${esc(r.address)}</span><br>
-        <span style="font-size:12px">⭐ ${esc(r.score)} · ${esc(r.status)}</span><br>
-        <span style="font-size:12px;color:${r.is_available ? "#16a34a" : "#dc2626"}">${r.is_available ? "✅ Abierto" : "❌ Cerrado"}</span><br>
-        <span style="font-size:11px;color:#888">🕐 ${esc(r.eta)} · 📍 ${esc(r.city)}</span>
-      </div>
-    \`)`
-).join('\n    ');
-
-const available = restaurants.filter(r => r.is_available).length;
-const unavailable = restaurants.filter(r => !r.is_available).length;
 
 const html = `<!DOCTYPE html>
 <html lang="es">
@@ -88,26 +60,32 @@ const html = `<!DOCTYPE html>
     .custom-marker .marker-dot.available { background: #16a34a; }
     .custom-marker .marker-dot.unavailable { background: #dc2626; }
     .leaflet-popup-content-wrapper { border-radius: 10px; }
+    .loading-msg {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 2000; background: white; padding: 24px 32px; border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2); font-size: 16px; text-align: center;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div class="loading-msg" id="loader">Cargando restaurantes...</div>
   <div class="search-box">
-    <input type="text" id="search" placeholder="🔍 Buscar restaurante..." autocomplete="off">
+    <input type="text" id="search" placeholder="🔍 Buscar restaurante..." autocomplete="off" disabled>
   </div>
   <button class="refresh-btn" onclick="refreshData()">
     <span class="spinner"></span>
     <span class="btn-text">🔄 Actualizar</span>
   </button>
-  <div class="info-panel">
+  <div class="info-panel" id="panel" style="display:none">
     <h2>🛵 Rappi Restaurants</h2>
-    <div class="stat"><span class="label">Total</span><span class="value blue">${restaurants.length}</span></div>
-    <div class="stat"><span class="label">Abiertos</span><span class="value green">${available}</span></div>
-    <div class="stat"><span class="label">Cerrados</span><span class="value red">${unavailable}</span></div>
+    <div class="stat"><span class="label">Total</span><span class="value blue" id="stat-total">0</span></div>
+    <div class="stat"><span class="label">Abiertos</span><span class="value green" id="stat-open">0</span></div>
+    <div class="stat"><span class="label">Cerrados</span><span class="value red" id="stat-closed">0</span></div>
     <div class="divider"></div>
-    <div class="stat"><span class="label">Cúcuta</span><span class="value">${restaurants.filter(r => r.city === "Cúcuta").length}</span></div>
-    <div class="stat"><span class="label">Villa del Rosario</span><span class="value">${restaurants.filter(r => r.city === "Villa del Rosario").length}</span></div>
-    <div class="stat"><span class="label">Los Patios</span><span class="value">${restaurants.filter(r => r.city === "Los Patios").length}</span></div>
+    <div class="stat"><span class="label">Cúcuta</span><span class="value" id="stat-cucuta">0</span></div>
+    <div class="stat"><span class="label">Villa del Rosario</span><span class="value" id="stat-vr">0</span></div>
+    <div class="stat"><span class="label">Los Patios</span><span class="value" id="stat-lp">0</span></div>
     <div class="legend">
       <span><span class="dot green"></span> Abierto</span>
       <span><span class="dot red"></span> Cerrado</span>
@@ -120,17 +98,62 @@ const html = `<!DOCTYPE html>
       maxZoom: 19,
     }).addTo(map);
 
-    ${markers}
+    let allMarkers = [];
 
-    const allMarkers = [];
-    map.eachLayer(l => { if (l instanceof L.Marker) allMarkers.push(l); });
-    if (allMarkers.length > 0) {
-      const group = L.featureGroup(allMarkers);
-      map.fitBounds(group.getBounds().pad(0.1));
+    function esc(s) { return String(s).replace(/\\\\/g,'\\\\\\\\').replace(/\`/g,'\\\\\`').replace(/\\$/g,'\\\\\\$'); }
+
+    function renderMarkers(restaurants) {
+      allMarkers.forEach(m => map.removeLayer(m));
+      allMarkers = [];
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('panel').style.display = '';
+      document.getElementById('search').disabled = false;
+
+      const available = restaurants.filter(r => r.is_available).length;
+      document.getElementById('stat-total').textContent = restaurants.length;
+      document.getElementById('stat-open').textContent = available;
+      document.getElementById('stat-closed').textContent = restaurants.length - available;
+      document.getElementById('stat-cucuta').textContent = restaurants.filter(r => r.city === 'Cúcuta').length;
+      document.getElementById('stat-vr').textContent = restaurants.filter(r => r.city === 'Villa del Rosario').length;
+      document.getElementById('stat-lp').textContent = restaurants.filter(r => r.city === 'Los Patios').length;
+
+      restaurants.filter(r => r.lat && r.lng).forEach(r => {
+        const marker = L.marker([r.lat, r.lng], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: '<div class="marker-dot ' + (r.is_available ? 'available' : 'unavailable') + '"></div>',
+            iconSize: [12, 12],
+            iconAnchor: [6, 6],
+          })
+        }).addTo(map).bindPopup(
+          '<div style="min-width:220px">' +
+            (r.logo ? '<img src="' + esc(r.logo) + '" style="width:100%;height:60px;object-fit:cover;border-radius:6px;margin-bottom:6px" onerror="this.style.display=\\'none\\'">' : '') +
+            '<strong style="font-size:14px">' + esc(r.name) + '</strong><br>' +
+            '<span style="color:#666;font-size:12px">' + esc(r.address) + '</span><br>' +
+            '<span style="font-size:12px">⭐ ' + esc(r.score) + ' · ' + esc(r.status) + '</span><br>' +
+            '<span style="font-size:12px;color:' + (r.is_available ? '#16a34a' : '#dc2626') + '">' + (r.is_available ? '✅ Abierto' : '❌ Cerrado') + '</span><br>' +
+            '<span style="font-size:11px;color:#888">🕐 ' + esc(r.eta) + ' · 📍 ' + esc(r.city) + '</span>' +
+          '</div>'
+        );
+        allMarkers.push(marker);
+      });
+
+      if (allMarkers.length > 0) {
+        const group = L.featureGroup(allMarkers);
+        map.fitBounds(group.getBounds().pad(0.1));
+      }
     }
 
-    const searchInput = document.getElementById('search');
-    searchInput.addEventListener('input', (e) => {
+    // Load data
+    fetch('restaurants.json?t=' + Date.now())
+      .then(r => r.json())
+      .then(data => renderMarkers(data))
+      .catch(() => {
+        document.getElementById('loader').textContent = 'Error cargando datos';
+      });
+
+    // Search
+    document.getElementById('search').addEventListener('input', (e) => {
       const q = e.target.value.toLowerCase().trim();
       let visible = 0;
       allMarkers.forEach(m => {
@@ -145,14 +168,15 @@ const html = `<!DOCTYPE html>
       }
     });
 
+    // Refresh
     async function refreshData() {
       const btn = document.querySelector('.refresh-btn');
       btn.disabled = true;
       btn.classList.add('loading');
       try {
         const res = await fetch('/refresh');
-        if (res.status === 404) {
-          alert('Refresh no disponible en GitHub Pages.\\nEjecutá localmente: node fetch-restaurants.mjs <token>');
+        if (res.status === 404 || res.status === 0) {
+          alert('Refresh no disponible在线.\\nCorré localmente:\\nnode fetch-restaurants.mjs <token>\\nnode deploy.cjs');
           btn.disabled = false;
           btn.classList.remove('loading');
           return;
@@ -172,7 +196,7 @@ const html = `<!DOCTYPE html>
           btn.classList.remove('loading');
         }
       } catch {
-        alert('Refresh no disponible.\\nEjecutá localmente: node fetch-restaurants.mjs <token>');
+        alert('Refresh no disponible在线.\\nCorré localmente:\\nnode fetch-restaurants.mjs <token>\\nnode deploy.cjs');
         btn.disabled = false;
         btn.classList.remove('loading');
       }
@@ -182,4 +206,4 @@ const html = `<!DOCTYPE html>
 </html>`;
 
 fs.writeFileSync('map.html', html);
-console.log('✅ map.html regenerated (no circles)');
+console.log('✅ map.html generated (loads restaurants.json dynamically)');
